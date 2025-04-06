@@ -141,7 +141,7 @@ async def attack(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 # Admin command to set user balance
-async def devil(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def raja(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = str(update.effective_user.id)
 
     if user_id != ADMIN_ID:
