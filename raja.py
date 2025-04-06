@@ -1,6 +1,8 @@
 import logging
 import re
 import asyncio
+import smtplib
+from email.mime.text import MIMEText
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -18,94 +20,120 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Bot configuration
+# Configuration
 TOKEN = "7244625688:AAFYZ_b5S8VQqMmrhu22XKy-QEtUqZBa4B8"
-ADMIN_IDS = [8091696994]  # Replace with your Telegram ID
-ABUSE_EMAIL = "abuse@telegram.org"  # Telegram's official abuse email
-REPORT_INTERVAL = 4  # Report every 1 hour (in seconds)
+ADMIN_IDS = [8091696994]  # Your Telegram ID
+REPORT_INTERVAL = 5 # 
+
+# Official Telegram report destinations
+REPORT_RECIPIENTS = {
+    "Abuse": "abuse@telegram.org",
+    "DMCA": "dmca@telegram.org",
+    "Support": "support@telegram.org",
+    "Legal": "legal@telegram.org",
+    "Copyright": "copyright@telegram.org"
+}
 
 # Report categories
 REPORT_CATEGORIES = {
     "DDoS": "🚫 DDoS/Server Attack",
-    "ChildAbuse": "⚠️ Child Abuse/Illegal Content",
-    "BGMI_Hack": "🎮 BGMI/Free Fire Hacks",
+    "ChildAbuse": "⚠️ Child Abuse/Illegal Content", 
+    "Hacking": "💻 Hacking/Cheating Services",
     "Spam": "📢 Spam/Scam",
-    "Piracy": "🏴‍☠️ Piracy/Illegal Sharing"
+    "Piracy": "🏴‍☠️ Piracy/Copyright Violation"
 }
 
-# Database simulation
+# Database
 reports_db = {}
-active_reports = {}  # Tracks channels being actively reported
+active_reports = {}
 
-def extract_channel_info(text):
-    """Extract channel username or ID from various formats"""
-    if text.startswith('@'):
-        return text.strip()
-    
-    link_pattern = r'(?:https?://)?t\.me/([a-zA-Z0-9_]+)'
-    match = re.search(link_pattern, text)
-    if match:
-        return f"@{match.group(1)}"
-    
+def extract_channel_link(text):
+    """Extract only t.me links"""
+    patterns = [
+        r'(https?://t\.me/[a-zA-Z0-9_]+)',
+        r'(t\.me/[a-zA-Z0-9_]+)'
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1)
     return None
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    await update.message.reply_markdown_v2(
-        f"👋 Hello {user.mention_markdown_v2()}!\n\n"
-        "🔹 Report harmful Telegram channels\n\n"
+async def send_email_report(channel, category, report_count):
+    """Send email to all Telegram departments"""
+    subject = f"Violation Report: {channel} - {category}"
+    body = f"""
+    Official Violation Report ({report_count} reports)
+    
+    Channel: {channel}
+    Category: {category}
+    Violation Type: {REPORT_CATEGORIES[category]}
+    
+    Evidence suggests this channel is violating Telegram's Terms of Service.
+    Please investigate and take appropriate action.
+    """
+    
+    for dept, email in REPORT_RECIPIENTS.items():
+        try:
+            msg = MIMEText(body)
+            msg['Subject'] = f"{subject} [{dept}]"
+            msg['From'] = "your_email@example.com"
+            msg['To'] = email
+            
+            # Configure your SMTP settings
+            with smtplib.SMTP('smtp.example.com', 587) as server:
+                server.starttls()
+                server.login("your_email@example.com", "your_password")
+                server.send_message(msg)
+            
+            logger.info(f"Report sent to {dept} department")
+        except Exception as e:
+            logger.error(f"Failed to send to {email}: {e}")
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🛡️ Telegram Channel Reporter Bot\n\n"
+        "🔹 Only accepts t.me links (e.g., t.me/channel or https://t.me/channel)\n\n"
         "📌 Commands:\n"
-        "/start - Show this message\n"
-        "/report - Report a channel\n"
+        "/report - Start reporting a channel\n"
         "/stopreport - Stop active reports\n"
-        "/stats - View report stats (admin only)"
+        "/status - Check active reports\n"
+        "/stats - View all reports (admin)"
     )
 
 async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Initiate the reporting process"""
     await update.message.reply_text(
-        "Please send:\n"
-        "- Channel username (@example)\n"
-        "- Channel link (t.me/example)\n"
-        "- Or forward a message from the channel"
+        "Please send the channel link in format:\n"
+        "• t.me/channelname\n"
+        "• https://t.me/channelname\n\n"
+        "This bot will continuously report to all Telegram departments."
     )
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    message = update.message
-    channel = None
-    
-    if message.text and not message.text.startswith('/'):
-        channel = extract_channel_info(message.text)
-    elif message.forward_from_chat and message.forward_from_chat.type == 'channel':
-        channel = f"@{message.forward_from_chat.username}" if message.forward_from_chat.username else f"ID:{message.forward_from_chat.id}"
-    
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    channel = extract_channel_link(update.message.text)
     if not channel:
-        await update.message.reply_text("❌ Invalid channel format. Try again or use /report")
+        await update.message.reply_text(
+            "❌ Invalid format. Only t.me links accepted.\n"
+            "Examples:\n"
+            "t.me/channelname\n"
+            "https://t.me/channelname"
+        )
         return
     
     context.user_data['channel_to_report'] = channel
-    await show_report_categories(update)
+    await show_categories(update)
 
-async def show_report_categories(update: Update):
-    """Show report categories"""
+async def show_categories(update: Update):
     keyboard = [
-        [InlineKeyboardButton(label, callback_data=f"report_{code}")]
-        for code, label in REPORT_CATEGORIES.items()
+        [InlineKeyboardButton(text, callback_data=f"cat_{code}")] 
+        for code, text in REPORT_CATEGORIES.items()
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    if update.callback_query:
-        await update.callback_query.edit_message_text(
-            "Select report category:",
-            reply_markup=reply_markup
-        )
-    else:
-        await update.message.reply_text(
-            "Select report category:",
-            reply_markup=reply_markup
-        )
+    await update.message.reply_text(
+        "Select violation type:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
-async def handle_category_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
@@ -113,103 +141,127 @@ async def handle_category_selection(update: Update, context: ContextTypes.DEFAUL
     channel = context.user_data.get('channel_to_report')
     
     if not channel:
-        await query.edit_message_text("❌ Error: Channel not found. Please try again.")
+        await query.edit_message_text("❌ Error: Channel missing")
         return
     
-    # Store report
+    # Initialize tracking
     if channel not in reports_db:
-        reports_db[channel] = {cat: 0 for cat in REPORT_CATEGORIES}
-    reports_db[channel][category] += 1
+        reports_db[channel] = {
+            'category': category,
+            'count': 0,
+            'reports_sent': {dept: 0 for dept in REPORT_RECIPIENTS}
+        }
     
     # Start continuous reporting
-    if channel not in active_reports:
-        active_reports[channel] = True
-        asyncio.create_task(continuous_report(context, channel, category))
+    active_reports[channel] = True
+    asyncio.create_task(report_loop(context, channel, category))
     
     await query.edit_message_text(
-        f"✅ Continuous reporting started for:\n\n"
+        f"🚨 Continuous Reporting Activated 🚨\n\n"
         f"Channel: {channel}\n"
         f"Category: {REPORT_CATEGORIES[category]}\n\n"
-        f"Reports will be sent to Telegram every hour.\n"
-        f"Use /stopreport to stop."
+        f"Reports will be sent to:\n"
+        f"• Abuse Team\n• Copyright Team\n• Support Team\n• Legal Team\n\n"
+        f"Use /stopreport to cancel."
     )
 
-async def continuous_report(context: ContextTypes.DEFAULT_TYPE, channel: str, category: str):
-    """Continuously report the channel"""
-    while channel in active_reports and active_reports[channel]:
-        # Send report to Telegram's abuse team (simulated)
-        report_details = (
-            f"🚨 Automated Abuse Report 🚨\n\n"
-            f"Channel: {channel}\n"
-            f"Category: {REPORT_CATEGORIES[category]}\n"
-            f"Total Reports: {reports_db[channel][category]}\n\n"
-            f"Please investigate this channel for violations."
-        )
+async def report_loop(context: ContextTypes.DEFAULT_TYPE, channel: str, category: str):
+    """Continuous reporting to all departments"""
+    while active_reports.get(channel, False):
+        reports_db[channel]['count'] += 1
         
-        logger.info(f"Sending report to Telegram for {channel}")
+        # Send to all departments
+        await send_email_report(channel, category, reports_db[channel]['count'])
         
-        # In a real implementation, you would:
-        # 1. Email abuse@telegram.org with these details
-        # 2. Or use Telegram's official reporting API if available
+        # Update counts
+        for dept in REPORT_RECIPIENTS:
+            reports_db[channel]['reports_sent'][dept] += 1
+        
+        # Notify admin
+        for admin_id in ADMIN_IDS:
+            try:
+                await context.bot.send_message(
+                    admin_id,
+                    f"✅ Report #{reports_db[channel]['count']} sent for {channel}"
+                )
+            except Exception as e:
+                logger.error(f"Admin notify failed: {e}")
         
         await asyncio.sleep(REPORT_INTERVAL)
 
 async def stop_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Stop continuous reporting"""
     channel = context.user_data.get('channel_to_report')
-    if not channel:
-        await update.message.reply_text("No active reports to stop.")
+    if not channel or channel not in active_reports:
+        await update.message.reply_text("No active reports for this channel")
         return
     
-    if channel in active_reports:
-        active_reports.pop(channel)
-        await update.message.reply_text(f"✅ Stopped reporting for {channel}")
-    else:
-        await update.message.reply_text(f"No active reports for {channel}")
+    active_reports.pop(channel)
+    await update.message.reply_text(
+        f"🛑 Stopped reporting for {channel}\n"
+        f"Total reports sent: {reports_db[channel]['count']}"
+    )
 
-async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show report statistics"""
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not active_reports:
+        await update.message.reply_text("No active reports running")
+        return
+    
+    msg = ["🚀 Active Reports:"]
+    for channel in active_reports:
+        data = reports_db[channel]
+        msg.append(
+            f"\n🔹 {channel}\n"
+            f"Category: {REPORT_CATEGORIES[data['category']}\n"
+            f"Reports sent: {data['count']}"
+        )
+    
+    await update.message.reply_text("\n".join(msg))
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
-        await update.message.reply_text("❌ You don't have permission to use this command.")
+        await update.message.reply_text("❌ Admin access required")
         return
     
     if not reports_db:
-        await update.message.reply_text("No reports yet.")
+        await update.message.reply_text("No reports in database")
         return
     
-    stats = ["📊 Active Reports:\n"]
-    stats.extend([f"- {channel}" for channel in active_reports])
+    msg = ["📊 Report Statistics"]
+    for channel, data in reports_db.items():
+        msg.append(
+            f"\n📌 {channel}\n"
+            f"Category: {REPORT_CATEGORIES[data['category']}\n"
+            f"Total Reports: {data['count']}\n"
+            "Sent to:"
+        )
+        for dept, count in data['reports_sent'].items():
+            msg.append(f"  • {dept}: {count}")
     
-    stats.append("\n\n📈 Report Statistics:")
-    for channel, categories in reports_db.items():
-        stats.append(f"\n🔹 {channel}:")
-        stats.extend([f"  {REPORT_CATEGORIES[cat]}: {count}" 
-                    for cat, count in categories.items() if count > 0])
-    
-    await update.message.reply_text("\n".join(stats))
+    await update.message.reply_text("\n".join(msg))
 
 def main():
-    application = Application.builder().token(TOKEN).build()
-
-    # Command handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("report", report_command))
-    application.add_handler(CommandHandler("stopreport", stop_report))
-    application.add_handler(CommandHandler("stats", show_stats))
+    app = Application.builder().token(TOKEN).build()
     
-    # Message handlers
-    application.add_handler(MessageHandler(
-        filters.TEXT | filters.FORWARDED & ~filters.COMMAND,
+    # Commands
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("report", report_command))
+    app.add_handler(CommandHandler("stopreport", stop_report))
+    app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("stats", stats))
+    
+    # Messages
+    app.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
         handle_message
     ))
     
-    # Button handlers
-    application.add_handler(CallbackQueryHandler(
-        handle_category_selection,
-        pattern="^report_"
+    # Callbacks
+    app.add_handler(CallbackQueryHandler(
+        handle_category,
+        pattern="^cat_"
     ))
-
-    application.run_polling()
+    
+    app.run_polling()
 
 if __name__ == '__main__':
     main()
