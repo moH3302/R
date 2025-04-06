@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 TOKEN = "7244625688:AAFYZ_b5S8VQqMmrhu22XKy-QEtUqZBa4B8"
 ADMIN_IDS = [8091696994]  # Replace with your Telegram ID
 ABUSE_EMAIL = "abuse@telegram.org"  # Telegram's official abuse email
-REPORT_INTERVAL = 3600  # Report every 1 hour (in seconds)
+REPORT_INTERVAL = 4  # Report every 1 hour (in seconds)
 
 # Report categories
 REPORT_CATEGORIES = {
