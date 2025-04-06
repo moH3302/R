@@ -1,7 +1,14 @@
 import logging
 import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext, MessageHandler, Filters
+from telegram.ext import (
+    Updater,
+    CommandHandler,
+    CallbackQueryHandler,
+    CallbackContext,
+    MessageHandler,
+    filters
+)
 
 # Enable logging
 logging.basicConfig(
@@ -11,8 +18,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Bot configuration
-TOKEN = "7244625688:AAFYZ_b5S8VQqMmrhu22XKy-QEtUqZBa4B8"
-ADMIN_IDS = [8091696994]  # Replace with your Telegram ID
+TOKEN = "YOUR_BOT_TOKEN_HERE"
+ADMIN_IDS = [123456789]  # Replace with your Telegram ID
 
 # Report categories
 REPORT_CATEGORIES = {
@@ -189,7 +196,7 @@ def main():
     
     # Message handlers
     dispatcher.add_handler(MessageHandler(
-        Filters.text | Filters.forwarded,
+        filters.TEXT | filters.FORWARDED,
         handle_message
     ))
     
