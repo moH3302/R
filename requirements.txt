@@ -4,4 +4,4 @@ flask
 aiogram 
 pyTelegramBotAPI 
 python-telegram-bot
-python-telegram-bot --upgrade
+
