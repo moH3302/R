@@ -1,0 +1,6 @@
+python-telegram-bot[job-queue]
+telebot 
+flask 
+aiogram 
+pyTelegramBotAPI 
+python-telegram-bot
