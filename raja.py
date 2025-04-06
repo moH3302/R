@@ -2,10 +2,10 @@ import logging
 import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Updater,
+    Application,
     CommandHandler,
     CallbackQueryHandler,
-    CallbackContext,
+    ContextTypes,
     MessageHandler,
     filters
 )
@@ -18,8 +18,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Bot configuration
-TOKEN = "YOUR_BOT_TOKEN_HERE"
-ADMIN_IDS = [123456789]  # Replace with your Telegram ID
+TOKEN = "7244625688:AAFYZ_b5S8VQqMmrhu22XKy-QEtUqZBa4B8"
+ADMIN_IDS = [8091696994]  # Replace with your Telegram ID
 
 # Report categories
 REPORT_CATEGORIES = {
@@ -47,9 +47,9 @@ def extract_channel_info(text):
     
     return None
 
-def start(update: Update, context: CallbackContext) -> None:
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
-    update.message.reply_markdown_v2(
+    await update.message.reply_markdown_v2(
         f"👋 Hello {user.mention_markdown_v2()}!\n\n"
         "🔹 You can report harmful Telegram channels using:\n"
         "- Channel username (@channelname)\n"
@@ -63,7 +63,7 @@ def start(update: Update, context: CallbackContext) -> None:
         "- Piracy"
     )
 
-def handle_message(update: Update, context: CallbackContext) -> None:
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.message
     channel = None
     
@@ -79,7 +79,7 @@ def handle_message(update: Update, context: CallbackContext) -> None:
             channel = f"ID:{message.forward_from_chat.id}"
     
     if not channel:
-        update.message.reply_text(
+        await update.message.reply_text(
             "❌ Please send:\n"
             "- Channel username (@example)\n"
             "- Channel link (t.me/example)\n"
@@ -88,9 +88,9 @@ def handle_message(update: Update, context: CallbackContext) -> None:
         return
     
     context.user_data['channel_to_report'] = channel
-    show_report_categories(update)
+    await show_report_categories(update)
 
-def show_report_categories(update: Update):
+async def show_report_categories(update: Update):
     """Show inline keyboard with report categories"""
     keyboard = []
     row = []
@@ -107,25 +107,25 @@ def show_report_categories(update: Update):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     if update.callback_query:
-        update.callback_query.edit_message_text(
+        await update.callback_query.edit_message_text(
             "Select report category:",
             reply_markup=reply_markup
         )
     else:
-        update.message.reply_text(
+        await update.message.reply_text(
             "Select report category:",
             reply_markup=reply_markup
         )
 
-def handle_category_selection(update: Update, context: CallbackContext):
+async def handle_category_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    query.answer()
+    await query.answer()
     
     _, category = query.data.split('_')
     channel = context.user_data.get('channel_to_report')
     
     if not channel:
-        query.edit_message_text("❌ Error: Channel not found. Please try again.")
+        await query.edit_message_text("❌ Error: Channel not found. Please try again.")
         return
     
     # Store report
@@ -135,16 +135,16 @@ def handle_category_selection(update: Update, context: CallbackContext):
     reports_db[channel][category] += 1
     
     # Notify admins
-    notify_admins(context, channel, category)
+    await notify_admins(context, channel, category)
     
-    query.edit_message_text(
+    await query.edit_message_text(
         f"✅ Report submitted!\n\n"
         f"Channel: {channel}\n"
         f"Category: {REPORT_CATEGORIES[category]}\n\n"
         f"Thank you for making Telegram safer!"
     )
 
-def notify_admins(context: CallbackContext, channel: str, category: str):
+async def notify_admins(context: ContextTypes.DEFAULT_TYPE, channel: str, category: str):
     """Notify all admins about new report"""
     report_count = reports_db[channel][category]
     
@@ -158,7 +158,7 @@ def notify_admins(context: CallbackContext, channel: str, category: str):
     
     for admin_id in ADMIN_IDS:
         try:
-            context.bot.send_message(
+            await context.bot.send_message(
                 admin_id,
                 message,
                 parse_mode='Markdown'
@@ -166,14 +166,14 @@ def notify_admins(context: CallbackContext, channel: str, category: str):
         except Exception as e:
             logger.error(f"Failed to notify admin {admin_id}: {e}")
 
-def show_stats(update: Update, context: CallbackContext):
+async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show report statistics (admin only)"""
     if update.effective_user.id not in ADMIN_IDS:
-        update.message.reply_text("❌ You don't have permission to use this command.")
+        await update.message.reply_text("❌ You don't have permission to use this command.")
         return
     
     if not reports_db:
-        update.message.reply_text("No reports yet.")
+        await update.message.reply_text("No reports yet.")
         return
     
     stats = ["📊 **Report Statistics**\n"]
@@ -184,30 +184,30 @@ def show_stats(update: Update, context: CallbackContext):
                 channel_stats.append(f"{REPORT_CATEGORIES[cat]}: {count}")
         stats.append("\n".join(channel_stats))
     
-    update.message.reply_markdown_v2("\n".join(stats))
+    await update.message.reply_markdown_v2("\n".join(stats))
 
 def main():
-    updater = Updater(TOKEN)
-    dispatcher = updater.dispatcher
+    # Create the Application
+    application = Application.builder().token(TOKEN).build()
 
     # Commands
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("stats", show_stats))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("stats", show_stats))
     
     # Message handlers
-    dispatcher.add_handler(MessageHandler(
+    application.add_handler(MessageHandler(
         filters.TEXT | filters.FORWARDED,
         handle_message
     ))
     
     # Button handlers
-    dispatcher.add_handler(CallbackQueryHandler(
+    application.add_handler(CallbackQueryHandler(
         handle_category_selection,
         pattern="^report_"
     ))
 
-    updater.start_polling()
-    updater.idle()
+    # Run the bot
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
