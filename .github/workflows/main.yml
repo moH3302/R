@@ -1,0 +1,61 @@
+name: Run Python Telegram Bot
+
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: '0 */6 * * *'  # Runs every 6 hours
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        cache: 'pip'  # Caches dependencies for faster runs
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-dev build-essential
+
+    - name: Install Python packages
+      run: |
+        python -m pip install --upgrade pip
+        pip install --no-cache-dir \
+          python-telegram-bot==20.6 \
+          apscheduler==3.10.1 \
+          python-dotenv
+        [ -f requirements.txt ] && pip install -r requirements.txt
+
+    - name: Verify and set permissions
+      run: |
+        if [ ! -f raja.py ]; then
+          echo "::error file=raja.py::File raja.py not found!"
+          exit 1
+        fi
+        chmod +x Rahul
+
+    - name: Run Telegram bot
+      run: python -u raja.py  # -u for unbuffered output
+      env:
+        BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        ADMIN_ID: ${{ secrets.ADMIN_ID }}
+        # Add other required environment variables here
+
+    - name: Upload logs if failed
+      if: failure()
+      uses: actions/upload-artifact@v4  # Updated to v4
+      with:
+        name: bot-error-logs
+        path: |
+          *.log
+          errors/
+        retention-days: 3
